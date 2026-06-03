@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard Absensi - KEL6</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background-color: #4CAF50; color: white; }
+    </style>
+</head>
+<body>
+    <h2>Live Dashboard Kehadiran</h2>
+    <a href="data.html">Tambah Mahasiswa Baru</a>
+    <table>
+        <thead>
+            <tr>
+                <th>Waktu Absen</th>
+                <th>Nama Mahasiswa</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody id="tabelAbsen">
+            </tbody>
+    </table>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBGYyHrmLjr_1-ethZGHy60LgzypyrkA00",
+            authDomain: "aiot-absensi-kel6.firebaseapp.com",
+            projectId: "aiot-absensi-kel6",
+            storageBucket: "aiot-absensi-kel6.firebasestorage.app",
+            messagingSenderId: "566485062868",
+            appId: "1:566485062868:web:a99601d74c4fbf0637d741",
+            databaseURL: "https://aiot-absensi-kel6-default-rtdb.firebaseio.com/" 
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+        const absenRef = ref(db, 'log_absensi/');
+
+        onValue(absenRef, (snapshot) => {
+            const table = document.getElementById("tabelAbsen");
+            table.innerHTML = ""; // Bersihkan tabel
+            snapshot.forEach((childSnapshot) => {
+                const data = childSnapshot.val();
+                const row = `<tr>
+                    <td>${data.waktu}</td>
+                    <td>${data.nama}</td>
+                    <td style="color: green; font-weight: bold;">Hadir</td>
+                </tr>`;
+                table.innerHTML += row;
+            });
+        });
+    </script>
+</body>
+</html>

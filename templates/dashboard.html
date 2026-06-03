@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h2 class="page-title">👋 Halo, Selamat Datang!</h2>
+<div class="row">
+    <div class="col-lg-7 mb-4">
+        <div class="card p-3">
+            <div class="d-flex justify-content-between mb-3 align-items-center">
+                <span class="fs-5 fw-bold"><i class="fa-solid fa-video text-primary me-2"></i> Layar Kamera</span>
+                <div>
+                    <button id="btnCamOn" class="btn btn-sm btn-primary me-1"><i class="fa-solid fa-power-off"></i> Nyalakan Kamera</button>
+                    <button id="btnCamOff" class="btn btn-sm btn-outline-danger" style="background: white;"><i class="fa-solid fa-xmark"></i> Matikan</button>
+                </div>
+            </div>
+            <div style="border-radius: 15px; overflow: hidden; background: #1A202C; border: 4px solid var(--primary-soft);">
+                <img src="{{ url_for('video_feed') }}" class="w-100" alt="Kamera Offline">
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-5 mb-4">
+        <div class="card p-4">
+            <h4 class="fw-bold mb-4 text-primary"><i class="fa-solid fa-play-circle me-2"></i>Mulai Kelas</h4>
+            <div class="alert alert-info rounded-4 border-0 mb-4" style="background: var(--primary-soft); color: #2B6CB0;">
+                <i class="fa-solid fa-info-circle me-2"></i> Pilih kelas terlebih dahulu.
+            </div>
+            <label class="form-label fw-bold">Pilih Kelas</label>
+            <select id="attendanceKelas" class="form-select mb-4">
+                <option value="" disabled selected>Pilih kelas yang diajar hari ini...</option>
+                <option value="TI-6A">TI-6A</option><option value="TI-6B">TI-6B</option>
+                <option value="TMJ-6A">TMJ-6A</option><option value="TMJ-6B">TMJ-6B</option>
+            </select>
+            <button id="btnStartAbsen" class="btn btn-success w-100 mb-3 py-3 fs-6"><i class="fa-solid fa-check-double me-2"></i> Mulai Absensi</button>
+            <button id="btnStopAbsen" class="btn btn-danger w-100 py-3 fs-6" disabled><i class="fa-solid fa-stop-circle me-2"></i> Selesai & Tutup Absen</button>
+            <div id="statusSesi" class="mt-4 text-center text-muted fw-medium">Status: Sedang Santai ☕</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let isCamActive = false;
+    document.getElementById('btnCamOn').addEventListener('click', () => { fetch('/api/kamera', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status:'on'})}); isCamActive = true; });
+    document.getElementById('btnCamOff').addEventListener('click', () => { fetch('/api/kamera', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status:'off'})}); isCamActive = false; forceStopAttendance(); });
+
+    document.getElementById('btnStartAbsen').addEventListener('click', () => {
+        if(!isCamActive) return alert("Nyalakan kamera dulu!");
+        const kelas = document.getElementById('attendanceKelas').value;
+        if(!kelas) return alert("Pilih kelasnya!");
+        fetch('/api/attendance', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action: 'start', kelas: kelas}) }).then(() => {
+            document.getElementById('btnStartAbsen').disabled = true; document.getElementById('attendanceKelas').disabled = true; document.getElementById('btnStopAbsen').disabled = false;
+            document.getElementById('statusSesi').innerHTML = `<span class="badge bg-success p-2 fs-6"><i class="fa-solid fa-spinner fa-spin me-2"></i> Merekam Kelas ${kelas}</span>`;
+        });
+    });
+
+    function forceStopAttendance() {
+        fetch('/api/attendance', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action: 'stop'}) }).then(() => {
+            document.getElementById('btnStartAbsen').disabled = false; document.getElementById('attendanceKelas').disabled = false; document.getElementById('btnStopAbsen').disabled = true;
+            document.getElementById('statusSesi').innerHTML = "Sesi absensi telah ditutup 📝";
+        });
+    }
+    document.getElementById('btnStopAbsen').addEventListener('click', forceStopAttendance);
+</script>
+{% endblock %}

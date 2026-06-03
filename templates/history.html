@@ -1,0 +1,73 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h2 class="page-title">Riwayat Kehadiran (Firebase) 📋</h2>
+<div class="card p-0">
+    <div class="card-header bg-white pt-4 pb-3 border-0 d-flex justify-content-between align-items-center">
+        <div class="fw-bold text-success fs-5"><i class="fa-solid fa-cloud-check me-2"></i> Log Realtime Database</div>
+        <select id="filterKelasTable" class="form-select form-select-sm w-auto fw-bold" style="background: #EBF8FF; color:#3182CE; border:none;">
+            <option value="ALL">Semua Kelas Terdaftar</option>
+            <option value="TI-6A">TI-6A</option><option value="TI-6B">TI-6B</option>
+            <option value="TMJ-6A">TMJ-6A</option><option value="TMJ-6B">TMJ-6B</option>
+        </select>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
+            <table class="table table-borderless align-middle m-0">
+                <thead class="sticky-top shadow-sm" style="background: #F7FAFC;">
+                    <tr>
+                        <th class="ps-4 text-muted" style="border-radius: 0 0 10px 0;">Waktu & Tanggal</th>
+                        <th class="text-muted">Kelas</th>
+                        <th class="text-muted">Nama Mahasiswa</th>
+                        <th class="text-muted" style="border-radius: 0 0 0 10px;">Status Hardware</th>
+                    </tr>
+                </thead>
+                <tbody id="tabelAbsen">
+                    <tr><td colspan="4" class="text-center text-muted py-5">Menyinkronkan history dari server...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module">
+    import { ref, onValue } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+    const absenRef = ref(window.db, 'log_absensi/');
+    let globalDataAbsen = []; 
+    
+    onValue(absenRef, (snapshot) => {
+        globalDataAbsen = [];
+        snapshot.forEach((child) => { globalDataAbsen.push(child.val()); });
+        globalDataAbsen.reverse(); // Terbaru di atas
+        renderTabelHistory(); 
+    });
+
+    document.getElementById('filterKelasTable').addEventListener('change', renderTabelHistory);
+    
+    function renderTabelHistory() {
+        const table = document.getElementById("tabelAbsen");
+        const filterValue = document.getElementById('filterKelasTable').value;
+        table.innerHTML = ""; 
+        const filteredData = globalDataAbsen.filter(data => filterValue === "ALL" || data.kelas === filterValue);
+
+        if(filteredData.length === 0) { table.innerHTML = `<tr><td colspan="4" class="text-center text-muted py-5">Masih kosong, belum ada yang absen.</td></tr>`; return; }
+
+        filteredData.forEach((data) => {
+            const fullTime = data.waktu || '--';
+            const sTime = fullTime.split(' ');
+            table.innerHTML += `<tr>
+                <td class="ps-4">
+                    <div class="fw-bold" style="color:#2D3748; font-size:1.05rem;">${sTime[1]||''}</div>
+                    <div style="font-size: 0.75rem; color: #A0AEC0;">${sTime[0]||''}</div>
+                </td>
+                <td><span class="badge" style="background:#EDF2F7; color:#4A5568; padding: 6px 12px; border-radius: 8px;">${data.kelas || '-'}</span></td>
+                <td class="fw-bold" style="color:#4299E1; font-size:1.05rem;">${data.nama}</td>
+                <td><span class="badge bg-success py-2 px-3 rounded-pill"><i class="fa-solid fa-check-circle me-1"></i> Hadir</span></td>
+            </tr>`;
+        });
+    }
+</script>
+{% endblock %}

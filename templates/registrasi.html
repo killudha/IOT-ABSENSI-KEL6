@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h2 class="page-title">Tambah Mahasiswa Baru 📸</h2>
+<div class="card" style="max-width: 600px;">
+    <div class="card-body p-5">
+        <div class="mb-4">
+            <label class="form-label fw-bold">Pilih Kelas</label>
+            <select id="regKelas" class="form-select">
+                <option value="" disabled selected>Pilih kelas mahasiswa...</option>
+                <option value="TI-6A">TI-6A</option><option value="TI-6B">TI-6B</option>
+                <option value="TMJ-6A">TMJ-6A</option><option value="TMJ-6B">TMJ-6B</option>
+            </select>
+        </div>
+        <div class="mb-4">
+            <label class="form-label fw-bold">Nomor Induk Mahasiswa (NIM)</label>
+            <input type="text" id="regNim" class="form-control" placeholder="Contoh: 12345678">
+        </div>
+        <div class="mb-5">
+            <label class="form-label fw-bold">Nama Lengkap</label>
+            <input type="text" id="regNama" class="form-control" placeholder="Masukkan nama lengkap...">
+        </div>
+        <button id="btnRegistrasi" class="btn btn-primary w-100 py-3 fs-6" style="background:#4299E1; border:none;"><i class="fa-solid fa-camera-viewfinder me-2"></i> Pindai Wajah Sekarang (30x)</button>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.getElementById('btnRegistrasi').addEventListener('click', function() {
+        const btn = this;
+        const kelas = document.getElementById('regKelas').value;
+        const nim = document.getElementById('regNim').value;
+        const nama = document.getElementById('regNama').value;
+        
+        if(!kelas || !nim || !nama) return alert("Mohon lengkapi seluruh isian!");
+        
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i> Menyalakan Kamera...';
+        btn.disabled = true;
+
+        fetch('/api/mulai_registrasi', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({nim, nama, kelas}) })
+        .then(() => {
+            window.location.href = '/'; // Pindah ke halaman kamera
+        })
+        .catch(() => {
+            alert("Terjadi kesalahan jaringan.");
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        });
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,217 @@
+{% extends 'Base.html' %}
+
+{% block content %}
+<h2 class="page-title">Sesi Absensi Kelas 🎥</h2>
+<div class="row">
+    <div class="col-lg-5 mb-4">
+        <div class="card p-3 h-100">
+            <div class="d-flex justify-content-between mb-3 align-items-center">
+                <span class="fs-5 fw-bold text-primary"><i class="fa-solid fa-video me-2"></i> Layar Pindai AI</span>
+                <div>
+                    <button id="btnCamOn" class="btn btn-sm btn-primary me-1"><i class="fa-solid fa-power-off"></i></button>
+                    <button id="btnCamOff" class="btn btn-sm btn-light border"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+            </div>
+            <div style="border-radius: 15px; overflow: hidden; background: #1A202C; border: 4px solid var(--primary-soft); display: flex; align-items: center;">
+                <img src="{{ url_for('video_feed') }}" class="w-100" alt="Kamera Offline" style="border-radius: 10px;">
+            </div>
+            
+            <div class="mt-4">
+                <label class="form-label fw-bold">Pilih Kelas</label>
+                <select id="attendanceKelas" class="form-select mb-3 dynamic-class-dropdown">
+                    <option value="" disabled selected>Memuat data kelas...</option>
+                </select>
+                <button id="btnStartAbsen" class="btn btn-success w-100 mb-2 py-3 fs-6 shadow-sm"><i class="fa-solid fa-play me-2"></i> Buka Sesi Kelas</button>
+                <button id="btnStopAbsen" class="btn btn-danger w-100 py-3 fs-6 shadow-sm" disabled><i class="fa-solid fa-stop me-2"></i> Tutup & Simpan Sesi</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TABEL MANAJEMEN STATUS MANUAL -->
+    <div class="col-lg-7 mb-4">
+        <div class="card p-4 h-100 border-0 shadow-sm" style="background: #ffffff;">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h5 class="fw-bold m-0 text-dark"><i class="fa-solid fa-clipboard-user me-2 text-primary"></i> Daftar Mahasiswa</h5>
+                <input type="text" id="searchSiswa" class="form-control form-control-sm w-auto" placeholder="Cari nama...">
+            </div>
+            
+            <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
+                <table class="table table-borderless align-middle" id="tabelSesi">
+                    <thead class="table-light sticky-top border-bottom">
+                        <tr>
+                            <th>NIM/NIP</th>
+                            <th>Nama Lengkap</th>
+                            <th width="150px">Kehadiran</th>
+                            <th width="120px">Keterangan</th>
+                        </tr>
+                    </thead>
+                    <tbody id="bodySiswaSesi">
+                        <tr><td colspan="4" class="text-center py-5 text-muted">Pilih kelas di samping untuk memuat daftar siswa.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module">
+    import { ref, onValue, push, set } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+    let isCamActive = false;
+    let sessionStartTime = 0;
+
+    document.getElementById('btnCamOn').addEventListener('click', () => { fetch('/api/kamera', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status:'on'})}); isCamActive = true; });
+    document.getElementById('btnCamOff').addEventListener('click', () => { fetch('/api/kamera', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status:'off'})}); isCamActive = false; if(!document.getElementById('btnStopAbsen').disabled) forceStopAttendance(); });
+
+    // 1. Saat Kelas dipilih, load daftar siswanya
+    document.getElementById('attendanceKelas').addEventListener('change', function() {
+        const kelasId = this.value;
+        const tbody = document.getElementById('bodySiswaSesi');
+        tbody.innerHTML = `<tr><td colspan="4" class="text-center py-4">Memuat data...</td></tr>`;
+        
+        onValue(ref(window.db, `users/${kelasId}`), (snapshot) => {
+            tbody.innerHTML = '';
+            if(!snapshot.exists()) { tbody.innerHTML = `<tr><td colspan="4" class="text-center py-5 text-muted">Belum ada siswa terdaftar di kelas ini.</td></tr>`; return; }
+            
+            snapshot.forEach((child) => {
+                const data = child.val();
+                if(data.role === "Mahasiswa") {
+                    tbody.innerHTML += `
+                        <tr class="row-siswa" data-nama="${data.nama}" data-nim="${data.id}">
+                            <td class="fw-bold">${data.id}</td>
+                            <td>${data.nama}</td>
+                            <td>
+                                <select class="form-select form-select-sm status-absen fw-bold" style="background:#FFF5F5; color:#C53030;">
+                                    <option value="Alfa" selected>Alfa</option>
+                                    <option value="Hadir">Hadir</option>
+                                    <option value="Sakit">Sakit</option>
+                                    <option value="Izin">Izin</option>
+                                    <option value="Terlambat">Terlambat</option>
+                                </select>
+                            </td>
+                            <td><input type="text" class="form-control form-control-sm ket-absen" placeholder="-"></td>
+                        </tr>
+                    `;
+                }
+            });
+            
+            // Logic merubah warna dropdown
+            document.querySelectorAll('.status-absen').forEach(el => {
+                el.addEventListener('change', function() { updateWarnaDropdown(this); });
+            });
+        }, { onlyOnce: true });
+    });
+
+    function updateWarnaDropdown(el) {
+        el.style.color = "#fff";
+        if(el.value === "Hadir") el.style.background = "#48BB78";
+        else if(el.value === "Alfa") el.style.background = "#F56565";
+        else if(el.value === "Sakit") el.style.background = "#4299E1";
+        else if(el.value === "Izin") el.style.background = "#ED8936";
+        else if(el.value === "Terlambat") el.style.background = "#D69E2E";
+    }
+
+    // 2. Mulai Sesi
+    document.getElementById('btnStartAbsen').addEventListener('click', () => {
+        if(!isCamActive) return alert("Nyalakan kamera terlebih dahulu!");
+        const kelas = document.getElementById('attendanceKelas').value;
+        if(!kelas) return alert("Anda harus memilih kelas!");
+        
+        sessionStartTime = Date.now();
+
+        fetch('/api/attendance', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action: 'start', kelas: kelas}) }).then(() => {
+            document.getElementById('btnStartAbsen').disabled = true; 
+            document.getElementById('attendanceKelas').disabled = true; 
+            document.getElementById('btnStopAbsen').disabled = false;
+        });
+    });
+
+    // 3. Listener Realtime untuk mendeteksi log AI masuk, lalu ubah status siswa jadi Hadir
+    onValue(ref(window.db, 'log_absensi'), (snapshot) => {
+        if(sessionStartTime === 0) return; // Jika sesi belum jalan, abaikan
+        
+        snapshot.forEach(child => {
+            const data = child.val();
+            // Jika log ini baru masuk (dilihat dari timestampnya)
+            if(data.timestamp > sessionStartTime && data.kelas === document.getElementById('attendanceKelas').value) {
+                // Cari baris di tabel yang namanya cocok
+                const rows = document.querySelectorAll('.row-siswa');
+                rows.forEach(row => {
+                    if(row.dataset.nama === data.nama) {
+                        const selectEl = row.querySelector('.status-absen');
+                        if(selectEl.value !== "Hadir") {
+                            selectEl.value = "Hadir";
+                            updateWarnaDropdown(selectEl);
+                        }
+                    }
+                });
+            }
+        });
+    });
+
+    // 4. Tutup Sesi & Simpan Semua ke Rekap Firebase
+    document.getElementById('btnStopAbsen').addEventListener('click', () => {
+        if(confirm("Tutup sesi absensi ini? Pastikan semua status manual sudah benar.")) {
+            forceStopAttendance();
+        }
+    });
+
+    function forceStopAttendance() {
+        const kelas = document.getElementById('attendanceKelas').value;
+        
+        // Ambil data dari tabel
+        const rekapAbsensi = {};
+        let totalHadir = 0, totalSakit = 0, totalIzin = 0, totalAlfa = 0, totalTerlambat = 0;
+
+        document.querySelectorAll('.row-siswa').forEach(row => {
+            const nim = row.dataset.nim;
+            const nama = row.dataset.nama;
+            const status = row.querySelector('.status-absen').value;
+            const ket = row.querySelector('.ket-absen').value;
+            
+            rekapAbsensi[nim] = { nama, status, ket };
+            
+            if(status === "Hadir") totalHadir++;
+            else if(status === "Sakit") totalSakit++;
+            else if(status === "Izin") totalIzin++;
+            else if(status === "Alfa") totalAlfa++;
+            else if(status === "Terlambat") totalTerlambat++;
+        });
+
+        // Buat objek sesi
+        const sessionPayload = {
+            kelas: kelas,
+            waktu_selesai: new Date().toLocaleString('id-ID'),
+            timestamp: Date.now(),
+            total_hadir: totalHadir,
+            total_sakit: totalSakit,
+            total_izin: totalIzin,
+            total_alfa: totalAlfa,
+            total_terlambat: totalTerlambat,
+            data_mahasiswa: rekapAbsensi
+        };
+
+        // Simpan ke riwayat_sesi
+        push(ref(window.db, `riwayat_sesi/${kelas}`), sessionPayload).then(() => {
+            fetch('/api/attendance', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action: 'stop'}) }).then(() => {
+                document.getElementById('btnStartAbsen').disabled = false; 
+                document.getElementById('attendanceKelas').disabled = false; 
+                document.getElementById('btnStopAbsen').disabled = true;
+                sessionStartTime = 0;
+                alert("Sesi kelas berhasil disimpan secara permanen di Riwayat Absensi.");
+            });
+        });
+    }
+
+    // Search Bar Logic
+    document.getElementById('searchSiswa').addEventListener('input', function(e) {
+        const term = e.target.value.toLowerCase();
+        document.querySelectorAll('.row-siswa').forEach(row => {
+            const text = row.innerText.toLowerCase();
+            row.style.display = text.includes(term) ? '' : 'none';
+        });
+    });
+</script>
+{% endblock %}

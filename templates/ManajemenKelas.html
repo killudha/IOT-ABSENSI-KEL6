@@ -1,0 +1,98 @@
+{% extends 'Base.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="page-title m-0">Manajemen Data Kelas 🏢</h2>
+    <button class="btn btn-primary shadow-sm px-4" data-bs-toggle="modal" data-bs-target="#modalTambahKelas">
+        <i class="fa-solid fa-plus me-2"></i> Buat Kelas Baru
+    </button>
+</div>
+
+<div class="card p-4 border-0">
+    <div class="card-header border-0 bg-transparent fw-bold text-primary px-0 mb-3 fs-5">
+        <i class="fa-solid fa-list-check me-2"></i> Tabel Kelas Terdaftar
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle m-0">
+            <thead class="table-light rounded">
+                <tr><th class="ps-3 rounded-start">Nama Kelas</th><th>Tahun Ajaran</th><th class="rounded-end">Tindakan</th></tr>
+            </thead>
+            <tbody id="tabelKelas">
+                <tr><td colspan="3" class="text-center py-5 text-muted">Memuat data kelas dari server...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- MODAL TAMBAH KELAS -->
+<div class="modal fade" id="modalTambahKelas" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content" style="border-radius: 20px; border: none; box-shadow: 0 10px 40px rgba(0,0,0,0.1);">
+            <div class="modal-header border-0 pt-4 px-4 pb-0">
+                <h4 class="modal-title fw-bold text-dark">Form Kelas Baru</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4">
+                <div class="mb-4">
+                    <label class="form-label fw-bold text-muted" style="font-size: 0.85rem; text-transform:uppercase;">Nama Kelas</label>
+                    <input type="text" id="inputNamaKelas" class="form-control" placeholder="Contoh: TI-6A" style="font-size:1.1rem; font-weight:600;">
+                </div>
+                <div class="mb-5">
+                    <label class="form-label fw-bold text-muted" style="font-size: 0.85rem; text-transform:uppercase;">Tahun Ajaran</label>
+                    <input type="text" id="inputTahunAjaran" class="form-control" placeholder="Contoh: 2023/2024">
+                </div>
+                <button id="btnSimpanKelas" class="btn btn-primary w-100 py-3 fs-6"><i class="fa-solid fa-save me-2"></i> Tambahkan ke Database</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module">
+    import { ref, set, remove, onValue } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+    
+    document.getElementById('btnSimpanKelas').addEventListener('click', () => {
+        // Hapus spasi dan ganti karakter ilegal untuk Firebase keys jika perlu, tapi kapitalisasikan
+        const rawKode = document.getElementById('inputNamaKelas').value.toUpperCase().trim();
+        const kode = rawKode.replace(/[.#$\[\]]/g, "-"); // cegah error node firebase
+        const tahun = document.getElementById('inputTahunAjaran').value.trim();
+        
+        if(!kode || !tahun) return alert("Isi Nama Kelas dan Tahun Ajaran!");
+        
+        set(ref(window.db, `master/kelas/${kode}`), { id: kode, nama: kode, tahun_ajaran: tahun }).then(() => {
+            alert("Kelas sukses dibuat!");
+            bootstrap.Modal.getInstance(document.getElementById('modalTambahKelas')).hide();
+            document.getElementById('inputNamaKelas').value = '';
+            document.getElementById('inputTahunAjaran').value = '';
+        });
+    });
+
+    onValue(ref(window.db, `master/kelas`), (snapshot) => {
+        const tbody = document.getElementById('tabelKelas');
+        tbody.innerHTML = '';
+        if(!snapshot.exists()) { tbody.innerHTML = `<tr><td colspan="3" class="text-center py-5">Belum ada kelas. Buat kelas baru terlebih dahulu.</td></tr>`; return; }
+        
+        snapshot.forEach((child) => {
+            const data = child.val();
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="ps-3 fw-bold text-primary py-3" style="cursor:pointer;" onclick="window.location.href='/detail-kelas/${data.id}'">
+                    ${data.nama} <i class="fa-solid fa-arrow-up-right-from-square ms-1" style="font-size:0.7rem;"></i>
+                </td>
+                <td><span class="badge bg-light text-dark border px-3 py-2">${data.tahun_ajaran || '-'}</span></td>
+                <td><button class="btn btn-sm btn-outline-danger px-3 rounded-pill" onclick="window.hapusData('master/kelas', '${data.id}')"><i class="fa-solid fa-trash"></i> Hapus</button></td>
+            `;
+            tbody.appendChild(tr);
+        });
+        
+        if(window.populateClassDropdowns) window.populateClassDropdowns();
+    });
+
+    window.hapusData = function(path, id) {
+        if(confirm(`Perhatian: Menghapus kelas ${id} TIDAK akan menghapus data siswanya, tapi kelas tidak bisa dipilih lagi. Lanjutkan?`)) {
+            remove(ref(window.db, `${path}/${id}`));
+        }
+    };
+</script>
+{% endblock %}

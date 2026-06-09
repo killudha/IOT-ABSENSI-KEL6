@@ -1,0 +1,109 @@
+{% extends 'Base.html' %}
+
+{% block content %}
+<h2 class="page-title">Pendaftaran Wajah Baru 📸</h2>
+
+<div class="row">
+    <!-- Form Registrasi -->
+    <div class="col-lg-5 mb-4" id="formSection">
+        <div class="card p-4 border-0">
+            <h5 class="fw-bold mb-4 text-primary"><i class="fa-solid fa-address-card me-2"></i> Data Identitas</h5>
+            <div class="mb-3">
+                <label class="form-label fw-bold">Role Pendaftar</label>
+                <select id="regRole" class="form-select">
+                    <option value="Mahasiswa" selected>Mahasiswa</option>
+                    <option value="Dosen">Dosen / Tenaga Pengajar</option>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="form-label fw-bold">Daftarkan ke Kelas</label>
+                <select id="regKelas" class="form-select dynamic-class-dropdown">
+                    <option value="" disabled selected>Memuat kelas...</option>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="form-label fw-bold">ID (NIM / NIP)</label>
+                <input type="text" id="regNim" class="form-control" placeholder="Contoh: 2307411012">
+            </div>
+            <div class="mb-4">
+                <label class="form-label fw-bold">Nama Lengkap</label>
+                <input type="text" id="regNama" class="form-control" placeholder="Nama lengkap...">
+            </div>
+            <button id="btnSiapkan" class="btn btn-primary w-100 py-3 fs-6 shadow-sm"><i class="fa-solid fa-video me-2"></i> Buka Layar Perekaman</button>
+        </div>
+    </div>
+
+    <!-- Area Kamera Perekaman (Disembunyikan) -->
+    <div class="col-lg-7 mb-4 d-none" id="cameraSection">
+        <div class="card p-4 text-center border-0 bg-white" style="box-shadow: 0 0 0 3px var(--primary-soft) inset;">
+            <h5 class="fw-bold text-primary mb-3 mt-2"><i class="fa-solid fa-camera-retro me-2"></i> Mode Tangkapan Manual</h5>
+            <div class="alert alert-warning py-2 mb-4 border-0 rounded-4" style="background: #FEFCBF; color: #C05621; font-size: 0.9rem;">
+                Tekan tombol biru <b>CAPTURE</b> sebanyak 30 kali. Ubah sedikit posisi wajah Anda (Kiri, Kanan, Senyum) di setiap jepretan.
+            </div>
+            
+            <div style="border-radius: 15px; overflow: hidden; background: #1A202C; margin-bottom: 20px;">
+                <img src="{{ url_for('video_feed') }}" class="w-100" alt="Kamera Offline" style="border-radius: 10px;">
+            </div>
+
+            <!-- TOMBOL CAPTURE MANUAL -->
+            <button id="btnCapture" class="btn btn-primary w-100 py-3 fs-5 mb-3 shadow"><i class="fa-solid fa-camera me-2"></i> CAPTURE FOTO</button>
+            <div class="progress rounded-pill bg-light border" style="height: 30px;">
+                <div id="captureProgress" class="progress-bar bg-success progress-bar-striped progress-bar-animated fs-6 fw-bold" style="width: 0%;">0 / 30 Frame</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.getElementById('btnSiapkan').addEventListener('click', function() {
+        const role = document.getElementById('regRole').value;
+        const kelas = document.getElementById('regKelas').value;
+        const nim = document.getElementById('regNim').value;
+        const nama = document.getElementById('regNama').value;
+        
+        if(!kelas || !nim || !nama) return alert("Tolong isi semua datanya ya!");
+        
+        this.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i> Menginisialisasi Perangkat...';
+        this.disabled = true;
+
+        fetch('/api/mulai_registrasi', { 
+            method: 'POST', 
+            headers: {'Content-Type': 'application/json'}, 
+            body: JSON.stringify({role, nim, nama, kelas}) 
+        })
+        .then(() => {
+            document.getElementById('formSection').classList.add('d-none');
+            document.getElementById('cameraSection').classList.remove('d-none');
+        });
+    });
+
+    document.getElementById('btnCapture').addEventListener('click', function() {
+        const btn = this;
+        btn.disabled = true; 
+        
+        fetch('/api/capture', { method: 'POST' })
+        .then(res => res.json())
+        .then(data => {
+            if(data.status === 'sukses') {
+                const persentase = (data.count / 30) * 100;
+                const progBar = document.getElementById('captureProgress');
+                progBar.style.width = persentase + '%';
+                progBar.innerHTML = `${data.count} / 30`;
+                
+                if(data.count >= 30) {
+                    btn.innerHTML = '<i class="fa-solid fa-check-double me-2"></i> Semua Foto Terekam!';
+                    btn.classList.replace('btn-primary', 'btn-success');
+                    setTimeout(() => {
+                        alert("Pendaftaran Wajah Berhasil disimpan di Database!");
+                        window.location.href = '/dashboard'; 
+                    }, 1000);
+                } else {
+                    btn.disabled = false;
+                }
+            }
+        });
+    });
+</script>
+{% endblock %}

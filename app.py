@@ -1,4 +1,4 @@
-from flask import Flask, render_template, Response, request, jsonify
+from flask import Flask, render_template, Response, request, jsonify, session, redirect, url_for
 import cv2
 import face_recognition
 import paho.mqtt.client as mqtt
@@ -11,8 +11,9 @@ from threading import Lock, Thread
 import numpy as np
 
 app = Flask(__name__)
+app.secret_key = 'rahasia_aiot_kelompok6'
 
-# --- KONFIGURASI FIREBASE ---
+# --- KONFIGURASI FIREBASE & MQTT ---
 BROKER = "broker.hivemq.com"
 TOPIC = "iot/absensi/kel6"
 FIREBASE_URL = "https://aiot-absensi-kel6-default-rtdb.asia-southeast1.firebasedatabase.app"
@@ -30,14 +31,20 @@ dataset_dir = "dataset"
 mahasiswa_sudah_absen = set()
 
 kamera_mode = "idle" 
-current_attendance_class, reg_nama, reg_kelas = "", "", ""
+current_attendance_class = ""
+reg_nama, reg_kelas = "", ""
 reg_count = 0
 MAX_FOTO = 30
+capture_trigger = False 
 
 is_camera_on = False 
 camera = None
 camera_lock = Lock()
 is_reloading_ai = False 
+
+ai_thread_active = False
+cached_face_locations = []
+cached_face_names = []
 
 def load_dataset_wajah():
     global known_face_encodings, known_face_names, known_face_classes
@@ -64,13 +71,42 @@ def load_dataset_wajah():
 
 load_dataset_wajah()
 
-def kirim_data_background(name, kelas, waktu_format):
+def kirim_data_background(name, kelas, waktu_format, timestamp_ms):
     try:
         mqtt_client.publish(TOPIC, "ABSEN_OK")
-        data_absen = {"nama": name, "kelas": kelas, "waktu": waktu_format}
-        requests.post(f"{FIREBASE_URL}/log_absensi.json", data=json.dumps(data_absen), timeout=2)
+        data_absen = {"nama": name, "kelas": kelas, "waktu": waktu_format, "timestamp": timestamp_ms}
+        requests.post(f"{FIREBASE_URL}/log_absensi.json", data=json.dumps(data_absen), timeout=3)
     except Exception as e:
-        print("Error MQTT/Firebase:", e)
+        print("Error Firebase/MQTT:", e)
+
+def process_ai_thread(rgb_small_frame, active_encodings, active_names, target_class):
+    global cached_face_locations, cached_face_names, ai_thread_active, mahasiswa_sudah_absen
+    try:
+        locations = face_recognition.face_locations(rgb_small_frame)
+        names = []
+        if len(active_encodings) > 0 and len(locations) > 0:
+            encodings = face_recognition.face_encodings(rgb_small_frame, locations)
+            for face_encoding in encodings:
+                matches = face_recognition.compare_faces(active_encodings, face_encoding)
+                name = "Tidak Dikenal"
+                if True in matches:
+                    first_match_index = matches.index(True)
+                    name = active_names[first_match_index]
+                    if name not in mahasiswa_sudah_absen:
+                        mahasiswa_sudah_absen.add(name) 
+                        waktu_format = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        timestamp_ms = int(time.time() * 1000) # Untuk sinkronisasi UI Frontend Realtime
+                        Thread(target=kirim_data_background, args=(name, target_class, waktu_format, timestamp_ms)).start()
+                names.append(name)
+        else:
+            names = ["Tidak Ada Data"] * len(locations)
+        
+        cached_face_locations = locations
+        cached_face_names = names
+    except Exception as e:
+        print("AI Error:", e)
+    finally:
+        ai_thread_active = False
 
 def reload_ai_background():
     global is_reloading_ai
@@ -78,9 +114,11 @@ def reload_ai_background():
     is_reloading_ai = False
 
 def generate_frames():
-    global kamera_mode, reg_nama, reg_kelas, reg_count, is_camera_on, camera, current_attendance_class, mahasiswa_sudah_absen, is_reloading_ai
-    last_ai_check_time, last_capture_time = 0, 0 
-    cached_face_locations, cached_face_names = [], []
+    global kamera_mode, reg_nama, reg_kelas, reg_count, is_camera_on, camera, current_attendance_class
+    global mahasiswa_sudah_absen, is_reloading_ai, capture_trigger, ai_thread_active
+    global cached_face_locations, cached_face_names
+    
+    last_ai_check_time = 0 
     
     while True:
         if not is_camera_on:
@@ -92,7 +130,9 @@ def generate_frames():
             continue
             
         with camera_lock:
-            if camera is None: continue
+            if camera is None or not camera.isOpened():
+                time.sleep(0.1)
+                continue
             success, frame = camera.read()
             
         if not success: 
@@ -100,6 +140,7 @@ def generate_frames():
             continue
             
         current_time = time.time()
+        
         if is_reloading_ai:
             cv2.putText(frame, "AI SINKRONISASI DATA BARU...", (20, 80), cv2.FONT_HERSHEY_DUPLEX, 0.7, (0, 165, 255), 2)
             
@@ -107,51 +148,37 @@ def generate_frames():
             cv2.putText(frame, "SIAP DIGUNAKAN", (20, 40), cv2.FONT_HERSHEY_DUPLEX, 0.8, (0, 255, 0), 2)
         
         elif kamera_mode == "register":
-            if current_time - last_capture_time > 0.15:
+            cv2.rectangle(frame, (20, 20), (350, 80), (255, 200, 0), cv2.FILLED)
+            cv2.putText(frame, f"Frame: {reg_count} / {MAX_FOTO}", (30, 60), cv2.FONT_HERSHEY_DUPLEX, 1, (0, 0, 0), 2)
+            
+            if capture_trigger:
                 person_dir = os.path.join(dataset_dir, reg_kelas, reg_nama)
                 os.makedirs(person_dir, exist_ok=True)
                 file_name = f"{person_dir}/{reg_count}.jpg"
                 cv2.imwrite(file_name, frame)
                 reg_count += 1
-                last_capture_time = current_time
-            
-            cv2.rectangle(frame, (20, 20), (350, 80), (255, 200, 0), cv2.FILLED)
-            cv2.putText(frame, f"Foto: {reg_count} / {MAX_FOTO}", (30, 60), cv2.FONT_HERSHEY_DUPLEX, 1, (0, 0, 0), 2)
-            
-            if reg_count >= MAX_FOTO:
-                kamera_mode = "idle"
-                is_reloading_ai = True
-                Thread(target=reload_ai_background).start() 
+                capture_trigger = False 
+                frame = np.zeros((480, 640, 3), np.uint8) 
+                
+                if reg_count >= MAX_FOTO:
+                    kamera_mode = "idle"
+                    is_reloading_ai = True
+                    Thread(target=reload_ai_background).start() 
                 
         elif kamera_mode == "attendance":
             active_encodings = [enc for enc, cls in zip(known_face_encodings, known_face_classes) if cls == current_attendance_class]
             active_names = [name for name, cls in zip(known_face_names, known_face_classes) if cls == current_attendance_class]
 
-            if not is_reloading_ai and current_time - last_ai_check_time > 0.4:
-                small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
-                rgb_small_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
-                cached_face_locations = face_recognition.face_locations(rgb_small_frame)
-                cached_face_names = []
-                
-                if len(active_encodings) > 0 and len(cached_face_locations) > 0:
-                    face_encodings = face_recognition.face_encodings(rgb_small_frame, cached_face_locations)
-                    for face_encoding in face_encodings:
-                        matches = face_recognition.compare_faces(active_encodings, face_encoding)
-                        name = "Tidak Dikenal"
-                        if True in matches:
-                            first_match_index = matches.index(True)
-                            name = active_names[first_match_index]
-                            if name not in mahasiswa_sudah_absen:
-                                mahasiswa_sudah_absen.add(name) 
-                                waktu_format = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                Thread(target=kirim_data_background, args=(name, current_attendance_class, waktu_format)).start()
-                        cached_face_names.append(name)
-                else:
-                    cached_face_names = ["Tidak Ada Data"] * len(cached_face_locations)
+            if not is_reloading_ai and not ai_thread_active and (current_time - last_ai_check_time > 0.3):
+                ai_thread_active = True
                 last_ai_check_time = current_time
+                # Skala gambar diperkecil agar sangat ringan di CPU
+                small_frame = cv2.resize(frame, (0, 0), fx=0.2, fy=0.2)
+                rgb_small_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
+                Thread(target=process_ai_thread, args=(rgb_small_frame, active_encodings, active_names, current_attendance_class)).start()
 
             for (top, right, bottom, left), name in zip(cached_face_locations, cached_face_names):
-                top *= 4; right *= 4; bottom *= 4; left *= 4
+                top *= 5; right *= 5; bottom *= 5; left *= 5 # Skala balik x5 karena resize fx=0.2
                 warna = (0, 0, 255) if name in ["Tidak Dikenal", "Tidak Ada Data"] else (0, 255, 0)
                 teks_layar = f"{name} (Oke)" if name in mahasiswa_sudah_absen else name
                 cv2.rectangle(frame, (left, top), (right, bottom), warna, 2)
@@ -165,21 +192,89 @@ def generate_frames():
         ret, buffer = cv2.imencode('.jpg', frame)
         yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
 
-# --- ROUTES FLASK ---
+# --- CEK SESI LOGIN ---
+def login_required(f):
+    def wrap(*args, **kwargs):
+        if 'logged_in' not in session: return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    wrap.__name__ = f.__name__
+    return wrap
+
+# --- ROUTES MVC FLASK ---
 @app.route('/')
-def dashboard(): return render_template('dashboard.html', active_page='dashboard')
+def home():
+    return render_template('Home.html')
 
-@app.route('/registrasi')
-def registrasi(): return render_template('registrasi.html', active_page='registrasi')
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        user = request.form.get('username')
+        pwd = request.form.get('password')
+        if user == 'admin' and pwd == '12345678':
+            session['logged_in'] = True
+            session['role'] = 'admin'
+            return redirect(url_for('dashboard'))
+        elif user == 'absensi' and pwd == '12345678':
+            session['logged_in'] = True
+            session['role'] = 'operator'
+            return redirect(url_for('absensi_kelas'))
+        return render_template('Login.html', error="Username atau Password salah!")
+    return render_template('Login.html')
 
-@app.route('/master')
-def master(): return render_template('master.html', active_page='master')
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('home'))
 
-@app.route('/history')
-def history(): return render_template('history.html', active_page='history')
+@app.route('/dashboard')
+@login_required
+def dashboard(): 
+    if session.get('role') != 'admin': return redirect(url_for('absensi_kelas'))
+    return render_template('Dashboard.html', active_page='dashboard', user_role=session.get('role'))
+
+@app.route('/absensi-kelas')
+@login_required
+def absensi_kelas(): 
+    return render_template('AbsensiKelas.html', active_page='absensi', user_role=session.get('role'))
+
+@app.route('/daftar-wajah')
+@login_required
+def daftar_wajah(): 
+    return render_template('DaftarWajah.html', active_page='registrasi', user_role=session.get('role'))
+
+@app.route('/manajemen-kelas')
+@login_required
+def manajemen_kelas(): 
+    if session.get('role') != 'admin': return redirect(url_for('absensi_kelas'))
+    return render_template('ManajemenKelas.html', active_page='master', user_role=session.get('role'))
+
+@app.route('/detail-kelas/<kelas_id>')
+@login_required
+def detail_kelas(kelas_id): 
+    if session.get('role') != 'admin': return redirect(url_for('absensi_kelas'))
+    return render_template('DetailKelas.html', active_page='master', kelas_id=kelas_id, user_role=session.get('role'))
+
+@app.route('/riwayat-absensi')
+@login_required
+def riwayat_absensi(): 
+    if session.get('role') != 'admin': return redirect(url_for('absensi_kelas'))
+    return render_template('RiwayatAbsensi.html', active_page='history', user_role=session.get('role'))
 
 @app.route('/video_feed')
-def video_feed(): return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+def video_feed(): 
+    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+# --- API CONTROL KAMERA & AI ---
+@app.route('/api/kamera_off', methods=['POST'])
+def auto_kamera_off():
+    global is_camera_on, camera, kamera_mode
+    with camera_lock:
+        kamera_mode = "idle"
+        if camera is not None: 
+            camera.release()
+            camera = None
+        is_camera_on = False
+    return "OK", 200
 
 @app.route('/api/kamera', methods=['POST'])
 def toggle_kamera():
@@ -187,16 +282,21 @@ def toggle_kamera():
     status = request.json.get('status')
     with camera_lock:
         if status == 'on' and not is_camera_on:
-            camera = cv2.VideoCapture(0, cv2.CAP_DSHOW) # Instan di Windows!
+            camera = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+            # OPTIMASI ANTI LAG: Batasi resolusi hardware langsung dari sumbernya
+            camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
             is_camera_on = True
             kamera_mode = "idle"
-            return jsonify({"status": "sukses", "pesan": "Kamera menyala."})
+            return jsonify({"status": "sukses"})
         elif status == 'off' and is_camera_on:
             kamera_mode = "idle"
-            if camera is not None: camera.release(); camera = None
+            if camera is not None: 
+                camera.release()
+                camera = None
             is_camera_on = False
-            return jsonify({"status": "sukses", "pesan": "Kamera dimatikan."})
-    return jsonify({"status": "error", "pesan": "Invalid"})
+            return jsonify({"status": "sukses"})
+    return jsonify({"status": "error"})
 
 @app.route('/api/attendance', methods=['POST'])
 def toggle_attendance():
@@ -214,29 +314,43 @@ def toggle_attendance():
         return jsonify({"status": "sukses"})
     return jsonify({"status": "error"})
 
-def registrasi_background(kelas, nim, nama):
+def simpan_db_background(kelas, nim, nama, role):
     try:
-        data_mahasiswa = {nim: {"nama": nama, "nim": nim, "kelas": kelas}}
-        requests.patch(f"{FIREBASE_URL}/mahasiswa/{kelas}.json", data=json.dumps(data_mahasiswa), timeout=3)
+        data_user = {"nama": nama, "id": nim, "kelas": kelas, "role": role}
+        requests.put(f"{FIREBASE_URL}/users/{kelas}/{nim}.json", data=json.dumps(data_user), timeout=5)
     except Exception as e:
-        print("Gagal registrasi DB:", e)
+        pass
 
 @app.route('/api/mulai_registrasi', methods=['POST'])
 def mulai_registrasi():
     global kamera_mode, reg_nama, reg_kelas, reg_count, is_camera_on, camera
     data = request.json
-    reg_nama, reg_kelas, reg_count, kamera_mode = data.get('nama'), data.get('kelas'), 0, "register"
+    reg_nama, reg_kelas, role, nim = data.get('nama'), data.get('kelas'), data.get('role'), data.get('nim')
+    reg_count = 0
+    kamera_mode = "register" 
     
     def setup_hardware():
         global is_camera_on, camera
         with camera_lock:
             if not is_camera_on:
                 camera = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+                camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
                 is_camera_on = True
-        registrasi_background(reg_kelas, data.get('nim'), reg_nama)
+        simpan_db_background(reg_kelas, nim, reg_nama, role)
 
     Thread(target=setup_hardware).start()
     return jsonify({"status": "sukses"})
 
+@app.route('/api/capture', methods=['POST'])
+def manual_capture():
+    global capture_trigger, reg_count
+    if kamera_mode == "register":
+        capture_trigger = True
+        time.sleep(0.2) 
+        return jsonify({"status": "sukses", "count": reg_count})
+    return jsonify({"status": "error"})
+
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # Threaded=True memastikan web tidak ngefreeze saat AI memproses
+    app.run(debug=True, host='0.0.0.0', port=5000, threaded=True)

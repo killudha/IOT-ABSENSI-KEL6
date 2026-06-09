@@ -1,65 +1,108 @@
-{% extends 'base.html' %}
+{% extends 'Base.html' %}
 
 {% block content %}
-<h2 class="page-title">👋 Halo, Selamat Datang!</h2>
-<div class="row">
-    <div class="col-lg-7 mb-4">
-        <div class="card p-3">
-            <div class="d-flex justify-content-between mb-3 align-items-center">
-                <span class="fs-5 fw-bold"><i class="fa-solid fa-video text-primary me-2"></i> Layar Kamera</span>
+<div class="d-flex justify-content-between align-items-center mb-5">
+    <div>
+        <h2 class="page-title m-0">Ringkasan Sistem 📊</h2>
+        <p class="text-muted mt-2">Pantau metrik dan koneksi database secara realtime.</p>
+    </div>
+    <div class="text-end">
+        <span class="badge bg-success px-3 py-2 rounded-pill fs-6"><i class="fa-solid fa-wifi fa-fade me-2"></i> Firebase Terhubung</span>
+    </div>
+</div>
+
+<div class="row g-4 mb-5">
+    <div class="col-md-4">
+        <div class="card p-4" style="border-left: 5px solid #3182CE;">
+            <div class="d-flex justify-content-between">
                 <div>
-                    <button id="btnCamOn" class="btn btn-sm btn-primary me-1"><i class="fa-solid fa-power-off"></i> Nyalakan Kamera</button>
-                    <button id="btnCamOff" class="btn btn-sm btn-outline-danger" style="background: white;"><i class="fa-solid fa-xmark"></i> Matikan</button>
+                    <h6 class="text-muted fw-bold text-uppercase">Total Kelas Terdaftar</h6>
+                    <h2 class="fw-bold mb-0" id="statKelas">0</h2>
                 </div>
-            </div>
-            <div style="border-radius: 15px; overflow: hidden; background: #1A202C; border: 4px solid var(--primary-soft);">
-                <img src="{{ url_for('video_feed') }}" class="w-100" alt="Kamera Offline">
+                <div class="fs-1 text-primary opacity-50"><i class="fa-solid fa-building"></i></div>
             </div>
         </div>
     </div>
-
-    <div class="col-lg-5 mb-4">
-        <div class="card p-4">
-            <h4 class="fw-bold mb-4 text-primary"><i class="fa-solid fa-play-circle me-2"></i>Mulai Kelas</h4>
-            <div class="alert alert-info rounded-4 border-0 mb-4" style="background: var(--primary-soft); color: #2B6CB0;">
-                <i class="fa-solid fa-info-circle me-2"></i> Pilih kelas terlebih dahulu.
+    <div class="col-md-4">
+        <div class="card p-4" style="border-left: 5px solid #48BB78;">
+            <div class="d-flex justify-content-between">
+                <div>
+                    <h6 class="text-muted fw-bold text-uppercase">Total Anggota/Wajah</h6>
+                    <h2 class="fw-bold mb-0" id="statUsers">0</h2>
+                </div>
+                <div class="fs-1 text-success opacity-50"><i class="fa-solid fa-users"></i></div>
             </div>
-            <label class="form-label fw-bold">Pilih Kelas</label>
-            <select id="attendanceKelas" class="form-select mb-4">
-                <option value="" disabled selected>Pilih kelas yang diajar hari ini...</option>
-                <option value="TI-6A">TI-6A</option><option value="TI-6B">TI-6B</option>
-                <option value="TMJ-6A">TMJ-6A</option><option value="TMJ-6B">TMJ-6B</option>
-            </select>
-            <button id="btnStartAbsen" class="btn btn-success w-100 mb-3 py-3 fs-6"><i class="fa-solid fa-check-double me-2"></i> Mulai Absensi</button>
-            <button id="btnStopAbsen" class="btn btn-danger w-100 py-3 fs-6" disabled><i class="fa-solid fa-stop-circle me-2"></i> Selesai & Tutup Absen</button>
-            <div id="statusSesi" class="mt-4 text-center text-muted fw-medium">Status: Sedang Santai ☕</div>
         </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card p-4" style="border-left: 5px solid #ED8936;">
+            <div class="d-flex justify-content-between">
+                <div>
+                    <h6 class="text-muted fw-bold text-uppercase">Total Absensi (Log)</h6>
+                    <h2 class="fw-bold mb-0" id="statLogs">0</h2>
+                </div>
+                <div class="fs-1 text-warning opacity-50"><i class="fa-solid fa-clock-rotate-left"></i></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card p-4 border-0">
+    <h5 class="fw-bold text-dark mb-4"><i class="fa-solid fa-bolt text-warning me-2"></i> 5 Aktivitas Kehadiran Terakhir</h5>
+    <div class="table-responsive">
+        <table class="table table-borderless align-middle m-0">
+            <thead class="table-light rounded">
+                <tr><th class="ps-3 rounded-start">Waktu</th><th>Nama</th><th>Kelas</th><th class="rounded-end">Status IoT</th></tr>
+            </thead>
+            <tbody id="tabelTerakhir">
+                <tr><td colspan="4" class="text-center py-4 text-muted">Memuat data terbaru...</td></tr>
+            </tbody>
+        </table>
     </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
-<script>
-    let isCamActive = false;
-    document.getElementById('btnCamOn').addEventListener('click', () => { fetch('/api/kamera', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status:'on'})}); isCamActive = true; });
-    document.getElementById('btnCamOff').addEventListener('click', () => { fetch('/api/kamera', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status:'off'})}); isCamActive = false; forceStopAttendance(); });
+<script type="module">
+    import { ref, onValue } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
-    document.getElementById('btnStartAbsen').addEventListener('click', () => {
-        if(!isCamActive) return alert("Nyalakan kamera dulu!");
-        const kelas = document.getElementById('attendanceKelas').value;
-        if(!kelas) return alert("Pilih kelasnya!");
-        fetch('/api/attendance', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action: 'start', kelas: kelas}) }).then(() => {
-            document.getElementById('btnStartAbsen').disabled = true; document.getElementById('attendanceKelas').disabled = true; document.getElementById('btnStopAbsen').disabled = false;
-            document.getElementById('statusSesi').innerHTML = `<span class="badge bg-success p-2 fs-6"><i class="fa-solid fa-spinner fa-spin me-2"></i> Merekam Kelas ${kelas}</span>`;
-        });
+    // Counter Kelas
+    onValue(ref(window.db, 'master/kelas'), (snapshot) => {
+        document.getElementById('statKelas').innerText = snapshot.exists() ? snapshot.size : 0;
     });
 
-    function forceStopAttendance() {
-        fetch('/api/attendance', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action: 'stop'}) }).then(() => {
-            document.getElementById('btnStartAbsen').disabled = false; document.getElementById('attendanceKelas').disabled = false; document.getElementById('btnStopAbsen').disabled = true;
-            document.getElementById('statusSesi').innerHTML = "Sesi absensi telah ditutup 📝";
+    // Counter Users (Mahasiswa + Dosen)
+    onValue(ref(window.db, 'users'), (snapshot) => {
+        let count = 0;
+        if(snapshot.exists()) {
+            snapshot.forEach(kelas => { count += kelas.size; });
+        }
+        document.getElementById('statUsers').innerText = count;
+    });
+
+    // Counter Logs & Tabel Terakhir
+    onValue(ref(window.db, 'log_absensi'), (snapshot) => {
+        document.getElementById('statLogs').innerText = snapshot.exists() ? snapshot.size : 0;
+        
+        const tbody = document.getElementById('tabelTerakhir');
+        tbody.innerHTML = '';
+        if(!snapshot.exists()) { tbody.innerHTML = `<tr><td colspan="4" class="text-center py-4 text-muted">Belum ada aktivitas.</td></tr>`; return; }
+        
+        let logs = [];
+        snapshot.forEach((child) => { logs.push(child.val()); });
+        logs.reverse(); // Terbaru di atas
+        
+        // Ambil 5 teratas
+        const recentLogs = logs.slice(0, 5);
+        recentLogs.forEach(data => {
+            const sTime = (data.waktu || '--').split(' ');
+            tbody.innerHTML += `<tr>
+                <td class="ps-3"><div class="fw-bold text-dark">${sTime[1]||''}</div><div style="font-size: 0.75rem;" class="text-muted">${sTime[0]||''}</div></td>
+                <td class="fw-bold text-primary">${data.nama}</td>
+                <td><span class="badge bg-light text-dark px-3 py-2 border">${data.kelas || '-'}</span></td>
+                <td><span class="badge bg-success-subtle text-success py-2 px-3 rounded-pill"><i class="fa-solid fa-check"></i> Triggered</span></td>
+            </tr>`;
         });
-    }
-    document.getElementById('btnStopAbsen').addEventListener('click', forceStopAttendance);
+    });
 </script>
 {% endblock %}

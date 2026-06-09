@@ -1,0 +1,232 @@
+{% extends 'Base.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <a href="/manajemen-kelas" class="text-muted text-decoration-none fw-bold" style="font-size:0.9rem;"><i class="fa-solid fa-arrow-left me-2"></i> Kembali</a>
+        <h2 class="page-title m-0 mt-2">Detail Kelas: <span class="text-primary">{{ kelas_id }}</span> 🎓</h2>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Tabel Anggota (CRUD) -->
+    <div class="col-lg-6 mb-4">
+        <div class="card p-4 border-0 h-100">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h5 class="fw-bold text-primary m-0"><i class="fa-solid fa-users me-2"></i> Daftar Anggota</h5>
+                <input type="text" id="searchAnggota" class="form-control form-control-sm w-auto" placeholder="Cari nama...">
+            </div>
+            <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
+                <table class="table table-hover align-middle">
+                    <thead class="table-light sticky-top">
+                        <tr><th class="ps-3">NIM/NIP</th><th>Nama Lengkap</th><th>Role</th><th>Aksi</th></tr>
+                    </thead>
+                    <tbody id="tabelUsers">
+                        <tr><td colspan="4" class="text-center py-5 text-muted">Memuat data anggota...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tabel Rekap Sesi -->
+    <div class="col-lg-6 mb-4">
+        <div class="card p-4 border-0 h-100" style="background: #F7FAFC;">
+            <h5 class="fw-bold text-success mb-4"><i class="fa-solid fa-folder-closed me-2"></i> Rekap Sesi Absensi</h5>
+            <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
+                <table class="table table-borderless align-middle bg-white rounded shadow-sm">
+                    <thead class="table-light sticky-top border-bottom">
+                        <tr><th class="ps-4">Sesi Selesai</th><th>Statistik</th><th>Tindakan</th></tr>
+                    </thead>
+                    <tbody id="tabelSesiAbsensi">
+                        <tr><td colspan="3" class="text-center py-5 text-muted">Memuat rekapan sesi...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Edit Siswa -->
+<div class="modal fade" id="modalEditSiswa" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0" style="border-radius: 20px;">
+            <div class="modal-header border-0 pt-4 px-4"><h5 class="fw-bold text-primary">Edit Mahasiswa</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body p-4">
+                <input type="hidden" id="editNimHidden">
+                <div class="mb-3"><label class="form-label fw-bold">Nama Lengkap</label><input type="text" id="editNamaInput" class="form-control"></div>
+                <div class="mb-4"><label class="form-label fw-bold">Role</label>
+                    <select id="editRoleInput" class="form-select"><option value="Mahasiswa">Mahasiswa</option><option value="Dosen">Dosen</option></select>
+                </div>
+                <button class="btn btn-primary w-100 py-3" onclick="simpanEditSiswa()">Simpan Perubahan</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Edit Sesi -->
+<div class="modal fade" id="modalEditSesi" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content border-0" style="border-radius: 20px;">
+            <div class="modal-header border-0 pt-4 px-4 bg-light">
+                <h5 class="fw-bold text-success m-0"><i class="fa-solid fa-pen-to-square me-2"></i> Edit Kehadiran Sesi</h5>
+                <button class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4">
+                <input type="hidden" id="editSesiIdHidden">
+                <div class="table-responsive">
+                    <table class="table table-bordered align-middle">
+                        <thead class="table-light"><tr><th>NIM</th><th>Nama</th><th>Status</th><th>Keterangan</th></tr></thead>
+                        <tbody id="tabelEditSesiSiswa"></tbody>
+                    </table>
+                </div>
+                <button class="btn btn-success w-100 py-3 mt-3" onclick="simpanEditSesi()">Simpan Perubahan Kehadiran</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script type="module">
+    import { ref, onValue, set, remove, update } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+    const kelasId = "{{ kelas_id }}";
+
+    // 1. Load Data Users (CRUD)
+    onValue(ref(window.db, `users/${kelasId}`), (snapshot) => {
+        const tbody = document.getElementById('tabelUsers');
+        tbody.innerHTML = '';
+        if(!snapshot.exists()) { tbody.innerHTML = `<tr><td colspan="4" class="text-center py-5 text-muted">Belum ada anggota terdaftar.</td></tr>`; return; }
+        
+        snapshot.forEach((child) => {
+            const data = child.val();
+            let roleBadge = data.role === 'Dosen' ? 'bg-primary' : 'bg-secondary';
+            // Data escape untuk JS onclick
+            const dataStr = encodeURIComponent(JSON.stringify(data));
+            tbody.innerHTML += `
+                <tr class="row-anggota">
+                    <td class="ps-3 fw-bold">${data.id}</td>
+                    <td class="text-dark nama-text">${data.nama}</td>
+                    <td><span class="badge ${roleBadge}">${data.role || 'Mahasiswa'}</span></td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary" onclick="bukaModalSiswa('${dataStr}')"><i class="fa-solid fa-pen"></i></button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="hapusSiswa('${data.id}')"><i class="fa-solid fa-trash"></i></button>
+                    </td>
+                </tr>
+            `;
+        });
+    });
+
+    window.hapusSiswa = function(id) {
+        if(confirm(`Hapus anggota ${id} secara permanen?`)) { remove(ref(window.db, `users/${kelasId}/${id}`)); }
+    }
+    window.bukaModalSiswa = function(dataStr) {
+        const data = JSON.parse(decodeURIComponent(dataStr));
+        document.getElementById('editNimHidden').value = data.id;
+        document.getElementById('editNamaInput').value = data.nama;
+        document.getElementById('editRoleInput').value = data.role;
+        new bootstrap.Modal(document.getElementById('modalEditSiswa')).show();
+    }
+    window.simpanEditSiswa = function() {
+        const id = document.getElementById('editNimHidden').value;
+        const nama = document.getElementById('editNamaInput').value;
+        const role = document.getElementById('editRoleInput').value;
+        update(ref(window.db, `users/${kelasId}/${id}`), { nama, role }).then(() => {
+            bootstrap.Modal.getInstance(document.getElementById('modalEditSiswa')).hide();
+        });
+    }
+
+    // Search Anggota
+    document.getElementById('searchAnggota').addEventListener('input', function(e) {
+        const term = e.target.value.toLowerCase();
+        document.querySelectorAll('.row-anggota').forEach(row => { row.style.display = row.innerText.toLowerCase().includes(term) ? '' : 'none'; });
+    });
+
+    // 2. Load DEDICATED Sesi Log
+    let cachedSessions = {}; // Untuk dipakai saat modal edit dibuka
+    onValue(ref(window.db, `riwayat_sesi/${kelasId}`), (snapshot) => {
+        const tbody = document.getElementById('tabelSesiAbsensi');
+        tbody.innerHTML = '';
+        if(!snapshot.exists()) { tbody.innerHTML = `<tr><td colspan="3" class="text-center py-5 text-muted">Belum ada rekam sesi kehadiran.</td></tr>`; return; }
+
+        let logs = [];
+        snapshot.forEach(child => { logs.push({key: child.key, val: child.val()}); cachedSessions[child.key] = child.val(); });
+        logs.reverse();
+
+        logs.forEach(log => {
+            const data = log.val;
+            const key = log.key;
+            tbody.innerHTML += `
+                <tr>
+                    <td class="ps-4">
+                        <div class="fw-bold text-dark">${data.waktu.split(' ')[1]||''}</div>
+                        <div style="font-size: 0.75rem;" class="text-muted">${data.waktu.split(' ')[0]||''}</div>
+                    </td>
+                    <td>
+                        <span class="badge bg-success" title="Hadir">${data.total_hadir || 0} H</span>
+                        <span class="badge bg-danger" title="Alfa">${data.total_alfa || 0} A</span>
+                        <span class="badge bg-primary" title="Sakit">${data.total_sakit || 0} S</span>
+                        <span class="badge bg-warning" title="Izin">${data.total_izin || 0} I</span>
+                        <span class="badge bg-secondary" title="Terlambat">${data.total_terlambat || 0} T</span>
+                    </td>
+                    <td>
+                        <button class="btn btn-sm btn-light border fw-bold text-primary" onclick="bukaModalSesi('${key}')"><i class="fa-solid fa-eye"></i> Detail/Edit</button>
+                    </td>
+                </tr>
+            `;
+        });
+    });
+
+    window.bukaModalSesi = function(sesiId) {
+        const dataSesi = cachedSessions[sesiId];
+        document.getElementById('editSesiIdHidden').value = sesiId;
+        const tbody = document.getElementById('tabelEditSesiSiswa');
+        tbody.innerHTML = '';
+        
+        for (const [nim, details] of Object.entries(dataSesi.data_mahasiswa)) {
+            // Setup dropdown
+            const options = ["Hadir", "Alfa", "Sakit", "Izin", "Terlambat"].map(opt => `<option value="${opt}" ${details.status === opt ? 'selected' : ''}>${opt}</option>`).join('');
+            
+            tbody.innerHTML += `
+                <tr class="row-edit-sesi" data-nim="${nim}">
+                    <td class="fw-bold">${nim}</td>
+                    <td><input type="text" class="form-control form-control-sm edit-sesi-nama border-0 bg-transparent" value="${details.nama}" readonly></td>
+                    <td><select class="form-select form-select-sm edit-sesi-status fw-bold">${options}</select></td>
+                    <td><input type="text" class="form-control form-control-sm edit-sesi-ket" value="${details.ket || ''}"></td>
+                </tr>
+            `;
+        }
+        new bootstrap.Modal(document.getElementById('modalEditSesi')).show();
+    }
+
+    window.simpanEditSesi = function() {
+        const sesiId = document.getElementById('editSesiIdHidden').value;
+        const newDataMhs = {};
+        let stats = { total_hadir: 0, total_sakit: 0, total_izin: 0, total_alfa: 0, total_terlambat: 0 };
+
+        document.querySelectorAll('.row-edit-sesi').forEach(row => {
+            const nim = row.dataset.nim;
+            const nama = row.querySelector('.edit-sesi-nama').value;
+            const status = row.querySelector('.edit-sesi-status').value;
+            const ket = row.querySelector('.edit-sesi-ket').value;
+            
+            newDataMhs[nim] = {nama, status, ket};
+            
+            if(status === "Hadir") stats.total_hadir++;
+            else if(status === "Sakit") stats.total_sakit++;
+            else if(status === "Izin") stats.total_izin++;
+            else if(status === "Alfa") stats.total_alfa++;
+            else if(status === "Terlambat") stats.total_terlambat++;
+        });
+
+        // Update ke Firebase
+        update(ref(window.db, `riwayat_sesi/${kelasId}/${sesiId}`), {
+            data_mahasiswa: newDataMhs, ...stats
+        }).then(() => {
+            alert("Rekap sesi berhasil diperbarui!");
+            bootstrap.Modal.getInstance(document.getElementById('modalEditSesi')).hide();
+        });
+    }
+</script>
+{% endblock %}
